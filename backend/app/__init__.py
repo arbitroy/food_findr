@@ -63,6 +63,7 @@ def create_app(config_class='config.config.Config'):
     # Create database tables
     with app.app_context():
         try:
+            db.drop_all()
             db.create_all()
             app.logger.info("Database tables created successfully")
         except Exception as e:
