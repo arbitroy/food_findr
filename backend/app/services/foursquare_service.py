@@ -52,7 +52,7 @@ class FoursquareService:
         # Prepare headers
         headers = {
             'Accept': 'application/json',
-            'Authorization': current_app.config['FOURSQUARE_CLIENT_SECRET']
+            'Authorization': current_app.config['FOURSQUARE_API_KEY']
         }
         
         # Prepare query parameters
@@ -86,6 +86,7 @@ class FoursquareService:
                 params=params
             )
             response.raise_for_status()
+            print("Response from Foursquare API:", response.json())  # Debugging line
             return response.json()
         except requests.RequestException as e:
             current_app.logger.error(f'Foursquare API Error: {e}')

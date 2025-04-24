@@ -23,7 +23,7 @@ class Config:
     # Foursquare API Configuration
     FOURSQUARE_CLIENT_ID = os.getenv('FOURSQUARE_CLIENT_ID')
     FOURSQUARE_CLIENT_SECRET = os.getenv('FOURSQUARE_CLIENT_SECRET')
-    
+    FOURSQUARE_API_KEY = os.getenv('FOURSQUARE_API_KEY')
     # Logging Configuration
     LOG_TO_STDOUT = os.getenv('LOG_TO_STDOUT', 'false').lower() == 'true'
     

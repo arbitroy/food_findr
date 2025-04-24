@@ -1,11 +1,13 @@
 from app import db
 from app.models import Restaurant
-from typing import List, Optional, Dict, Any
+from app.services.foursquare_service import FoursquareService
+from typing import List, Dict, Optional
 import math
+from sqlalchemy import or_
 
 class RestaurantSearchService:
     """
-    Simplified restaurant search service with geospatial filtering
+    Enhanced restaurant search service with local DB and Foursquare integration
     """
     
     @staticmethod
@@ -50,10 +52,10 @@ class RestaurantSearchService:
         min_rating: Optional[float] = None, 
         max_price: Optional[int] = None,
         query: Optional[str] = None,
-        max_distance: Optional[float] = None  # in kilometers
+        max_distance: Optional[float] = None
     ) -> List[Restaurant]:
         """
-        Advanced restaurant search with multiple filters
+        Comprehensive restaurant search with Foursquare integration
         
         :param latitude: Search center latitude
         :param longitude: Search center longitude
@@ -64,13 +66,13 @@ class RestaurantSearchService:
         :param max_distance: Maximum distance from search center
         :return: List of matching restaurants
         """
-        # Start with base query
+        # Start with local database search
         search_query = Restaurant.query
         
         # Text query filtering
         if query:
             search_query = search_query.filter(
-                db.or_(
+                or_(
                     Restaurant.name.ilike(f'%{query}%'),
                     Restaurant.description.ilike(f'%{query}%')
                 )
@@ -98,45 +100,66 @@ class RestaurantSearchService:
         if max_price:
             search_query = search_query.filter(Restaurant.price <= max_price)
         
-        # Execute initial query
-        restaurants = search_query.all()
+        # Execute local database search
+        local_restaurants = search_query.all()
         
-        # Post-query distance filtering
+        # Filter by distance if coordinates provided
         if latitude is not None and longitude is not None and max_distance is not None:
-            filtered_restaurants = []
-            for restaurant in restaurants:
-                if restaurant.latitude and restaurant.longitude:
-                    distance = cls.haversine_distance(
-                        latitude, longitude, 
-                        restaurant.latitude, restaurant.longitude
-                    )
-                    if distance <= max_distance:
-                        filtered_restaurants.append(restaurant)
-            restaurants = filtered_restaurants
+            local_restaurants = [
+                restaurant for restaurant in local_restaurants
+                if restaurant.latitude and restaurant.longitude and
+                cls.haversine_distance(
+                    latitude, longitude, 
+                    restaurant.latitude, restaurant.longitude
+                ) <= max_distance
+            ]
         
-        # Order by rating
-        restaurants.sort(key=lambda x: x.rating or 0, reverse=True)
+        # If not enough local results, fetch from Foursquare
+        if not local_restaurants or len(local_restaurants) < 10:
+            # Initialize Foursquare service
+            foursquare_service = FoursquareService()
+            
+            # Prepare Foursquare search parameters
+            foursquare_params = {
+                'latitude': latitude,
+                'longitude': longitude,
+                'query': query,
+                'limit': 50  # Fetch more results to supplement local data
+            }
+            
+            # Remove None values
+            foursquare_params = {k: v for k, v in foursquare_params.items() if v is not None}
+            
+            # Fetch restaurants from Foursquare
+            foursquare_restaurants = foursquare_service.get_restaurants_near(**foursquare_params)
+            
+            # Save new restaurants to local database
+            new_restaurants = []
+            for restaurant_data in foursquare_restaurants:
+                # Check if restaurant already exists
+                existing = Restaurant.query.filter_by(foursquare_id=restaurant_data['foursquare_id']).first()
+                
+                if not existing:
+                    # Create new restaurant
+                    new_restaurant = Restaurant(**restaurant_data)
+                    db.session.add(new_restaurant)
+                    new_restaurants.append(new_restaurant)
+            
+            # Commit new restaurants
+            db.session.commit()
+            
+            # Combine local and new restaurants
+            local_restaurants.extend(new_restaurants)
         
-        return restaurants
-    
-    @classmethod
-    def get_dietary_trends(cls) -> Dict[str, float]:
-        """
-        Calculate overall dietary trends across restaurants
+        # Final filtering and sorting
+        filtered_restaurants = []
+        for restaurant in local_restaurants:
+            # Additional filtering if needed
+            if (not min_rating or restaurant.rating >= min_rating) and \
+               (not max_price or restaurant.price <= max_price):
+                filtered_restaurants.append(restaurant)
         
-        :return: Dictionary of dietary option percentages
-        """
-        total_restaurants = Restaurant.query.count()
+        # Sort by rating
+        filtered_restaurants.sort(key=lambda x: x.rating or 0, reverse=True)
         
-        if total_restaurants == 0:
-            return {}
-        
-        trends = {
-            'vegan': Restaurant.query.filter(Restaurant.is_vegan == True).count() / total_restaurants * 100,
-            'vegetarian': Restaurant.query.filter(Restaurant.is_vegetarian == True).count() / total_restaurants * 100,
-            'halal': Restaurant.query.filter(Restaurant.is_halal == True).count() / total_restaurants * 100,
-            'kosher': Restaurant.query.filter(Restaurant.is_kosher == True).count() / total_restaurants * 100,
-            'gluten_free': Restaurant.query.filter(Restaurant.is_gluten_free == True).count() / total_restaurants * 100
-        }
-        
-        return trends
+        return filtered_restaurants
