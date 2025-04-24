@@ -1,0 +1,131 @@
+{
+	"info": {
+		"_postman_id": "food-findr-api-collection",
+		"name": "Food Findr API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Restaurants",
+			"item": [
+				{
+					"name": "Search Restaurants",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:5000/api/restaurants/search?latitude=40.7128&longitude=-74.0060&dietary_restrictions=vegan&min_rating=3.5&max_price=3&query=pizza&max_distance=10",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "5000",
+							"path": ["api", "restaurants", "search"],
+							"query": [
+								{"key": "latitude", "value": "40.7128"},
+								{"key": "longitude", "value": "-74.0060"},
+								{"key": "dietary_restrictions", "value": "vegan"},
+								{"key": "min_rating", "value": "3.5"},
+								{"key": "max_price", "value": "3"},
+								{"key": "query", "value": "pizza"},
+								{"key": "max_distance", "value": "10"}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Restaurant Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:5000/api/restaurants/1",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "5000",
+							"path": ["api", "restaurants", "1"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Nearby Restaurants",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:5000/api/restaurants/nearby?latitude=40.7128&longitude=-74.0060&max_distance=5&dietary_restrictions=vegetarian",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "5000",
+							"path": ["api", "restaurants", "nearby"],
+							"query": [
+								{"key": "latitude", "value": "40.7128"},
+								{"key": "longitude", "value": "-74.0060"},
+								{"key": "max_distance", "value": "5"},
+								{"key": "dietary_restrictions", "value": "vegetarian"}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Restaurant Insights",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:5000/api/restaurants/insights/1",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "5000",
+							"path": ["api", "restaurants", "insights", "1"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Trends and Analytics",
+			"item": [
+				{
+					"name": "Dietary Trends",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:5000/api/restaurants/dietary-trends",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "5000",
+							"path": ["api", "restaurants", "dietary-trends"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Filter Options",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:5000/api/restaurants/filter-options",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "5000",
+							"path": ["api", "restaurants", "filter-options"]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:5000",
+			"type": "string"
+		}
+	]
+}
