@@ -31,24 +31,38 @@ def search_restaurants():
         query = request.args.get('query')
         max_distance = request.args.get('max_distance', type=float)
         
-        # Perform search
-        restaurants = RestaurantSearchService.search_restaurants(
-            latitude=latitude,
-            longitude=longitude,
-            dietary_restrictions=dietary_restrictions,
-            min_rating=min_rating,
-            max_price=max_price,
-            query=query,
-            max_distance=max_distance
-        )
-        
-        # Convert to JSON-serializable format
-        restaurant_list = [restaurant.to_dict() for restaurant in restaurants]
-        
-        return jsonify({
-            'total_results': len(restaurant_list),
-            'restaurants': restaurant_list
-        }), 200
+        # Input validation
+        if latitude is None or longitude is None:
+            return jsonify({
+                'error': 'Location coordinates (latitude and longitude) are required'
+            }), 400
+            
+        # Perform search with error handling
+        try:
+            restaurants = RestaurantSearchService.search_restaurants(
+                latitude=latitude,
+                longitude=longitude,
+                dietary_restrictions=dietary_restrictions,
+                min_rating=min_rating,
+                max_price=max_price,
+                query=query,
+                max_distance=max_distance
+            )
+            
+            # Convert to JSON-serializable format
+            restaurant_list = [restaurant.to_dict() for restaurant in restaurants]
+            
+            return jsonify({
+                'total_results': len(restaurant_list),
+                'restaurants': restaurant_list
+            }), 200
+            
+        except Exception as e:
+            logger.error(f"Error in search execution: {e}")
+            return jsonify({
+                'error': 'Search execution failed',
+                'details': str(e)
+            }), 500
     
     except Exception as e:
         logger.error(f"Restaurant search error: {e}")
@@ -97,7 +111,36 @@ def get_dietary_trends():
     Retrieve dietary trends across all restaurants
     """
     try:
-        trends = RestaurantSearchService.get_dietary_trends()
+        # Calculate dietary trends
+        all_restaurants = Restaurant.query.all()
+        total_count = len(all_restaurants)
+        
+        if total_count == 0:
+            return jsonify({
+                'dietary_trends': {
+                    'vegan': 0,
+                    'vegetarian': 0,
+                    'halal': 0,
+                    'kosher': 0,
+                    'gluten_free': 0
+                }
+            }), 200
+        
+        # Count restaurants with each dietary option
+        vegan_count = sum(1 for r in all_restaurants if r.is_vegan)
+        vegetarian_count = sum(1 for r in all_restaurants if r.is_vegetarian)
+        halal_count = sum(1 for r in all_restaurants if r.is_halal)
+        kosher_count = sum(1 for r in all_restaurants if r.is_kosher)
+        gluten_free_count = sum(1 for r in all_restaurants if r.is_gluten_free)
+        
+        # Calculate percentages
+        trends = {
+            'vegan': round(vegan_count / total_count * 100, 2),
+            'vegetarian': round(vegetarian_count / total_count * 100, 2),
+            'halal': round(halal_count / total_count * 100, 2),
+            'kosher': round(kosher_count / total_count * 100, 2),
+            'gluten_free': round(gluten_free_count / total_count * 100, 2)
+        }
         
         return jsonify({
             'dietary_trends': trends
@@ -125,6 +168,12 @@ def find_nearby_restaurants():
         dietary_restrictions = request.args.getlist('dietary_restrictions')
         min_rating = request.args.get('min_rating', type=float)
         
+        # Input validation
+        if latitude is None or longitude is None:
+            return jsonify({
+                'error': 'Location coordinates (latitude and longitude) are required'
+            }), 400
+        
         # Perform search
         nearby_restaurants = RestaurantSearchService.search_restaurants(
             latitude=latitude,
@@ -134,19 +183,21 @@ def find_nearby_restaurants():
             min_rating=min_rating
         )
         
-        # Convert to JSON-serializable format
-        restaurant_list = [
-            {
-                **restaurant.to_dict(),
-                'distance': RestaurantSearchService.haversine_distance(
+        # Convert to JSON-serializable format with distance
+        restaurant_list = []
+        for restaurant in nearby_restaurants:
+            if restaurant.latitude is not None and restaurant.longitude is not None:
+                distance = RestaurantSearchService.haversine_distance(
                     latitude, longitude, 
                     restaurant.latitude, restaurant.longitude
                 )
-            } for restaurant in nearby_restaurants
-        ]
+                
+                restaurant_data = restaurant.to_dict()
+                restaurant_data['distance_km'] = round(distance, 2)
+                restaurant_list.append(restaurant_data)
         
         # Sort by distance
-        restaurant_list.sort(key=lambda x: x['distance'])
+        restaurant_list.sort(key=lambda x: x.get('distance_km', float('inf')))
         
         return jsonify({
             'total_results': len(restaurant_list),
@@ -166,13 +217,24 @@ def get_restaurant_insights(restaurant_id):
     Generate and retrieve NLP insights for a specific restaurant
     """
     try:
-        # Generate insights
-        insights = generate_restaurant_insights(restaurant_id)
+        # Check if restaurant exists
+        restaurant = Restaurant.query.get_or_404(restaurant_id)
         
-        return jsonify({
-            'restaurant_id': restaurant_id,
-            'insights': insights
-        }), 200
+        # Generate insights
+        try:
+            insights = generate_restaurant_insights(restaurant_id)
+            
+            return jsonify({
+                'restaurant_id': restaurant_id,
+                'restaurant_name': restaurant.name,
+                'insights': insights
+            }), 200
+        except Exception as e:
+            logger.error(f"Error generating insights: {e}")
+            return jsonify({
+                'error': 'Failed to generate insights',
+                'details': str(e)
+            }), 500
     
     except Exception as e:
         logger.error(f"Restaurant insights generation error: {e}")
@@ -201,6 +263,12 @@ def get_filter_options():
                 {'min_rating': 3.0, 'label': '3+ Stars'},
                 {'min_rating': 4.0, 'label': '4+ Stars'},
                 {'min_rating': 4.5, 'label': '4.5+ Stars'}
+            ],
+            'distance_options': [
+                {'max_distance': 1, 'label': 'Within 1 km'},
+                {'max_distance': 3, 'label': 'Within 3 km'},
+                {'max_distance': 5, 'label': 'Within 5 km'},
+                {'max_distance': 10, 'label': 'Within 10 km'}
             ]
         }
         

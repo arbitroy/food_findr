@@ -1,7 +1,10 @@
 import requests
 from flask import current_app
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 class FoursquareService:
     BASE_URL = 'https://api.foursquare.com/v3/places'
@@ -20,7 +23,7 @@ class FoursquareService:
         max_price: Optional[int] = None,
         open_now: bool = False,
         sort: str = 'relevance'
-    ) -> Dict:
+    ) -> Dict[str, Any]:
         """
         Search for restaurants near a specific location with advanced filtering
         
@@ -86,14 +89,14 @@ class FoursquareService:
                 params=params
             )
             response.raise_for_status()
-            print("Response from Foursquare API:", response.json())  # Debugging line
+            logger.info(f"Successfully retrieved data from Foursquare API")
             return response.json()
         except requests.RequestException as e:
-            current_app.logger.error(f'Foursquare API Error: {e}')
-            return None
+            logger.error(f'Foursquare API Error: {e}')
+            return {"results": []}  # Return empty results on error
     
     @classmethod
-    def parse_restaurant_data(cls, api_response: Dict) -> List[Dict]:
+    def parse_restaurant_data(cls, api_response: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Parse Foursquare API response and extract relevant restaurant information
         
@@ -101,38 +104,82 @@ class FoursquareService:
         :return: List of parsed restaurant dictionaries
         """
         if not api_response or 'results' not in api_response:
+            logger.warning("Empty or invalid API response")
             return []
         
         parsed_restaurants = []
-        for restaurant in api_response['results']:
+        
+        for restaurant in api_response.get('results', []):
+            # Skip if missing required information
+            fsq_id = restaurant.get('fsq_id')
+            name = restaurant.get('name')
+            
+            if not fsq_id or not name:
+                logger.warning(f"Skipping restaurant with missing ID or name: {restaurant}")
+                continue
+            
+            # Extract location data safely
+            location = restaurant.get('location', {})
+            address = location.get('formatted_address', '')
+            
+            # Extract coordinates safely
+            geocodes = restaurant.get('geocodes', {})
+            main_geocode = geocodes.get('main', {}) if geocodes else {}
+            latitude = main_geocode.get('latitude')
+            longitude = main_geocode.get('longitude')
+            
+            # Skip if missing coordinates
+            if latitude is None or longitude is None:
+                logger.warning(f"Skipping restaurant with missing coordinates: {name}")
+                continue
+                
+            # Extract categories safely
+            category_list = []
+            for category in restaurant.get('categories', []):
+                if category and category.get('name'):
+                    category_list.append(category.get('name'))
+            
+            categories_str = ', '.join(category_list)
+            
+            # Detect dietary options from name and categories
+            combined_text = f"{name.lower()} {categories_str.lower()}"
+            
+            is_vegan = 'vegan' in combined_text or 'plant-based' in combined_text
+            is_vegetarian = 'vegetarian' in combined_text or 'veggie' in combined_text
+            is_gluten_free = 'gluten-free' in combined_text or 'gluten free' in combined_text
+            is_halal = 'halal' in combined_text
+            is_kosher = 'kosher' in combined_text
+            
+            # Default rating and price if not available
+            rating = 4.0  # Default rating
+            price = 2  # Default to mid-range
+            
+            # Create restaurant data
             parsed_restaurant = {
-                'foursquare_id': restaurant.get('fsq_id'),
-                'name': restaurant.get('name'),
-                'address': restaurant['location'].get('formatted_address'),
-                'latitude': restaurant['geocodes']['main'].get('latitude'),
-                'longitude': restaurant['geocodes']['main'].get('longitude'),
-                
-                # Dietary and feature flags
-                'is_vegan': restaurant['features']['attributes'].get('vegan_diet') == 'true',
-                'is_vegetarian': restaurant['features']['attributes'].get('vegetarian_diet') == 'true',
-                'is_gluten_free': restaurant['features']['attributes'].get('gluten_free_diet') == 'true',
-                
-                # Additional details
-                'rating': restaurant.get('rating', 0),
-                'price': restaurant.get('price', 0),
-                'categories': [
-                    category.get('name') for category in restaurant.get('categories', [])
-                ],
-                
-                # Optional fields
-                'website': restaurant.get('website'),
-                'phone': restaurant.get('tel'),
-                'hours': restaurant.get('hours', {}).get('display'),
-                'open_now': restaurant.get('hours', {}).get('open_now', False)
+                'foursquare_id': fsq_id,
+                'name': name,
+                'address': address,
+                'latitude': latitude,
+                'longitude': longitude,
+                'rating': rating,
+                'price': price,
+                'categories': categories_str,
+                'is_vegan': is_vegan,
+                'is_vegetarian': is_vegetarian,
+                'is_gluten_free': is_gluten_free,
+                'is_halal': is_halal,
+                'is_kosher': is_kosher,
+                'raw_api_data': json.dumps({
+                    'name': name,
+                    'address': address,
+                    'categories': category_list
+                })
             }
             
+            logger.info(f"Parsed restaurant: {parsed_restaurant['name']} (ID: {parsed_restaurant['foursquare_id']})")
             parsed_restaurants.append(parsed_restaurant)
         
+        logger.info(f"Successfully parsed {len(parsed_restaurants)} restaurants from Foursquare data")
         return parsed_restaurants
     
     @classmethod
@@ -141,7 +188,7 @@ class FoursquareService:
         latitude: float, 
         longitude: float, 
         **kwargs
-    ) -> List[Dict]:
+    ) -> List[Dict[str, Any]]:
         """
         Convenience method to search and parse restaurants
         
@@ -151,26 +198,6 @@ class FoursquareService:
         :return: List of parsed restaurant dictionaries
         """
         api_response = cls.search_restaurants(latitude, longitude, **kwargs)
-        if api_response:
-            return cls.parse_restaurant_data(api_response)
-        return []
-
-# Example usage in a route or service
-def fetch_local_restaurants(latitude, longitude):
-    """
-    Fetch and process local restaurants
-    """
-    try:
-        # Search for restaurants, filter for vegan options
-        vegan_restaurants = FoursquareService.get_restaurants_near(
-            latitude, 
-            longitude, 
-            query='vegan',
-            radius=5000,  # 5km radius
-            limit=20
-        )
-        
-        return vegan_restaurants
-    except Exception as e:
-        current_app.logger.error(f'Restaurant fetch error: {e}')
-        return []
+        restaurants = cls.parse_restaurant_data(api_response)
+        logger.info(f"Found {len(restaurants)} restaurants near ({latitude}, {longitude})")
+        return restaurants

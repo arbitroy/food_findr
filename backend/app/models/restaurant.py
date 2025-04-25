@@ -1,8 +1,10 @@
 from app import db
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import JSONB
 import json
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Restaurant(db.Model):
     """
@@ -47,6 +49,35 @@ class Restaurant(db.Model):
     # Relationships
     reviews = db.relationship('Review', backref='restaurant', lazy='dynamic')
     
+    def __init__(self, **kwargs):
+        """
+        Initialize a Restaurant with robust validation
+        """
+        # Validate required fields
+        if 'foursquare_id' not in kwargs or not kwargs['foursquare_id']:
+            raise ValueError("foursquare_id is required")
+        
+        if 'name' not in kwargs or not kwargs['name']:
+            raise ValueError("name is required")
+        
+        # Set default values for optional fields
+        kwargs.setdefault('description', None)
+        kwargs.setdefault('address', None)
+        kwargs.setdefault('latitude', None)
+        kwargs.setdefault('longitude', None)
+        kwargs.setdefault('categories', None)
+        kwargs.setdefault('rating', 4.0)  # Default rating
+        kwargs.setdefault('price', 2)     # Default to mid-range
+        kwargs.setdefault('raw_api_data', None)
+        kwargs.setdefault('is_vegan', False)
+        kwargs.setdefault('is_vegetarian', False)
+        kwargs.setdefault('is_halal', False)
+        kwargs.setdefault('is_kosher', False)
+        kwargs.setdefault('is_gluten_free', False)
+        
+        # Initialize with validated data
+        super(Restaurant, self).__init__(**kwargs)
+    
     @classmethod
     def create_or_update_from_foursquare(cls, restaurant_data):
         """
@@ -55,68 +86,51 @@ class Restaurant(db.Model):
         :param restaurant_data: Dictionary of restaurant data from Foursquare
         :return: Restaurant instance
         """
-        # Try to find existing restaurant
-        existing = cls.query.filter_by(foursquare_id=restaurant_data.get('foursquare_id')).first()
+        # Validate required fields
+        if not restaurant_data.get('foursquare_id') or not restaurant_data.get('name'):
+            logger.error(f"Missing required fields in restaurant data: {restaurant_data}")
+            return None
         
-        # Prepare normalized data
-        normalized_data = {
-            'foursquare_id': restaurant_data.get('foursquare_id'),
-            'name': restaurant_data.get('name'),
-            'address': restaurant_data.get('address'),
-            'latitude': restaurant_data.get('latitude'),
-            'longitude': restaurant_data.get('longitude'),
-            'rating': restaurant_data.get('rating', 0),
-            'price': restaurant_data.get('price', 0),
-            'categories': ', '.join(restaurant_data.get('categories', [])),
-            'raw_api_data': json.dumps(restaurant_data),
+        try:
+            # Try to find existing restaurant
+            existing = cls.query.filter_by(foursquare_id=restaurant_data.get('foursquare_id')).first()
             
-            # Dietary flags with robust parsing
-            'is_vegan': cls._parse_dietary_flag(restaurant_data, 'vegan'),
-            'is_vegetarian': cls._parse_dietary_flag(restaurant_data, 'vegetarian'),
-            'is_halal': cls._parse_dietary_flag(restaurant_data, 'halal'),
-            'is_kosher': cls._parse_dietary_flag(restaurant_data, 'kosher'),
-            'is_gluten_free': cls._parse_dietary_flag(restaurant_data, 'gluten-free')
-        }
-        
-        if existing:
-            # Update existing restaurant
-            for key, value in normalized_data.items():
-                setattr(existing, key, value)
-            existing.updated_at = datetime.utcnow()
-            restaurant = existing
-        else:
-            # Create new restaurant
-            restaurant = cls(**normalized_data)
-            db.session.add(restaurant)
-        
-        return restaurant
-    
-    @staticmethod
-    def _parse_dietary_flag(restaurant_data, diet):
-        """
-        Robust parsing of dietary flags
-        
-        :param restaurant_data: Restaurant data dictionary
-        :param diet: Dietary restriction to check
-        :return: Boolean indicating presence of dietary option
-        """
-        # Check multiple possible locations for dietary information
-        diet_keywords = {
-            'vegan': ['vegan', 'plant-based', 'dairy-free'],
-            'vegetarian': ['vegetarian', 'no meat', 'meatless'],
-            'halal': ['halal', 'halal-certified'],
-            'kosher': ['kosher', 'kosher-certified'],
-            'gluten-free': ['gluten-free', 'no gluten']
-        }
-        
-        # Convert restaurant data to lowercase string for easy searching
-        data_str = str(restaurant_data).lower()
-        
-        # Check if any keywords are present
-        return any(
-            keyword in data_str 
-            for keyword in diet_keywords.get(diet, [])
-        )
+            # Prepare normalized data
+            normalized_data = {
+                'foursquare_id': restaurant_data.get('foursquare_id'),
+                'name': restaurant_data.get('name'),
+                'address': restaurant_data.get('address'),
+                'latitude': restaurant_data.get('latitude'),
+                'longitude': restaurant_data.get('longitude'),
+                'categories': restaurant_data.get('categories', ''),
+                'rating': restaurant_data.get('rating', 4.0),  # Default rating
+                'price': restaurant_data.get('price', 2),      # Default to mid-range
+                'raw_api_data': restaurant_data.get('raw_api_data'),
+                'is_vegan': restaurant_data.get('is_vegan', False),
+                'is_vegetarian': restaurant_data.get('is_vegetarian', False),
+                'is_halal': restaurant_data.get('is_halal', False),
+                'is_kosher': restaurant_data.get('is_kosher', False),
+                'is_gluten_free': restaurant_data.get('is_gluten_free', False)
+            }
+            
+            if existing:
+                # Update existing restaurant
+                for key, value in normalized_data.items():
+                    setattr(existing, key, value)
+                existing.updated_at = datetime.utcnow()
+                restaurant = existing
+                logger.info(f"Updated existing restaurant: {restaurant.name}")
+            else:
+                # Create new restaurant
+                restaurant = cls(**normalized_data)
+                db.session.add(restaurant)
+                logger.info(f"Created new restaurant: {restaurant.name}")
+            
+            return restaurant
+            
+        except Exception as e:
+            logger.error(f"Error creating/updating restaurant: {e}")
+            return None
     
     def to_dict(self):
         """
