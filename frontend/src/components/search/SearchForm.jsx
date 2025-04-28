@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom'; // Add this import
 import { useSearch } from '../../context/SearchContext';
 import useGeolocation from '../../hooks/useGeolocation';
 import Button from '../ui/Button';
@@ -6,6 +7,7 @@ import DietaryBadge from '../ui/DietaryBadge';
 import { getFilterOptions } from '../../services/api';
 
 const SearchForm = () => {
+    const navigate = useNavigate(); // Add this hook
     const { searchParams, setSearchParams } = useSearch();
     const [formData, setFormData] = useState({
         query: searchParams.query || '',
@@ -59,13 +61,15 @@ const SearchForm = () => {
     };
 
     const toggleDietaryRestriction = (restriction) => {
+        // Normalize the restriction name to ensure consistency
+        const normalizedRestriction = restriction.replace('-', '_').toLowerCase();
         const current = [...(searchParams.dietary_restrictions || [])];
-        const index = current.indexOf(restriction);
+        const index = current.indexOf(normalizedRestriction);
 
         if (index > -1) {
             current.splice(index, 1);
         } else {
-            current.push(restriction);
+            current.push(normalizedRestriction);
         }
 
         setSearchParams({
@@ -76,10 +80,23 @@ const SearchForm = () => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        
+        // Ensure latitude and longitude are valid numbers if provided
+        const updatedFormData = {
+            ...formData,
+            latitude: formData.latitude ? parseFloat(formData.latitude) : null,
+            longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+        };
+        
         setSearchParams({
             ...searchParams,
-            ...formData
+            ...updatedFormData
         });
+        
+        // Navigate to search page if not already there
+        if (window.location.pathname !== '/search') {
+            navigate('/search');
+        }
     };
 
     const handleGetLocation = () => {

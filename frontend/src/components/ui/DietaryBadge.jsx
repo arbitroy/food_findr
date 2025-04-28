@@ -48,8 +48,17 @@ const dietaryOptions = {
     }
 };
 
-const DietaryBadge = ({ type, size = 'md', onClick }) => {
-    // Handle dietary option that might come as "gluten-free" instead of "gluten_free"
+// Also add an alias for 'gluten-free' to 'gluten_free'
+dietaryOptions['gluten-free'] = dietaryOptions.gluten_free;
+
+const DietaryBadge = ({ type, size = 'md', onClick, className = '' }) => {
+    // Make sure type is a string before attempting string operations
+    if (typeof type !== 'string') {
+        console.error('Invalid dietary type:', type);
+        type = 'unknown';
+    }
+    
+    // Normalize the type to support both formats: gluten-free and gluten_free
     const normalizedType = type.replace('-', '_').toLowerCase();
     const option = dietaryOptions[normalizedType] || {
         label: type,
@@ -69,7 +78,7 @@ const DietaryBadge = ({ type, size = 'md', onClick }) => {
     return (
         <span
             onClick={onClick}
-            className={`${baseClasses} ${option.bgColor} ${sizeClasses[size]} ${interactiveClasses}`}
+            className={`${baseClasses} ${option.bgColor} ${sizeClasses[size]} ${interactiveClasses} ${className}`}
         >
             {option.icon}
             {option.label}

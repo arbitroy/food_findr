@@ -54,13 +54,15 @@ const FilterSidebar = ({ className = '' }) => {
     };
 
     const toggleDietaryRestriction = (restriction) => {
+        // Normalize the restriction name to ensure consistency
+        const normalizedRestriction = restriction.replace('-', '_').toLowerCase();
         const current = [...filters.dietary_restrictions];
-        const index = current.indexOf(restriction);
+        const index = current.indexOf(normalizedRestriction);
 
         if (index > -1) {
             current.splice(index, 1);
         } else {
-            current.push(restriction);
+            current.push(normalizedRestriction);
         }
 
         setFilters({
@@ -70,6 +72,7 @@ const FilterSidebar = ({ className = '' }) => {
     };
 
     const applyFilters = () => {
+        
         setSearchParams({
             ...searchParams,
             ...filters,
