@@ -32,25 +32,13 @@ export const SearchProvider = ({ children }) => {
     // Track if search should auto-execute (only for certain scenarios)
     const [autoSearchEnabled, setAutoSearchEnabled] = useState(false);
     
-    // Debounced search parameters (only for auto-search scenarios)
-    const [debouncedParams, setDebouncedParams] = useState(searchParams);
-    
     // Search cache
     const [searchCache, setSearchCache] = useState(new Map());
     
-    // Use ref for abort controller to avoid recreating executeSearch
+    // Use ref for abort controller and other mutable values
     const abortControllerRef = useRef(null);
-
-    // Debounce search parameters ONLY when auto-search is enabled
-    useEffect(() => {
-        if (!autoSearchEnabled) return;
-        
-        const timer = setTimeout(() => {
-            setDebouncedParams(searchParams);
-        }, 500);
-
-        return () => clearTimeout(timer);
-    }, [searchParams, autoSearchEnabled]);
+    const lastSearchParamsRef = useRef(null);
+    const searchTimeoutRef = useRef(null);
 
     // Generate cache key from search parameters - stable function
     const getCacheKey = useCallback((params) => {
@@ -61,7 +49,7 @@ export const SearchProvider = ({ children }) => {
         });
     }, []);
 
-    // Check if search parameters have meaningful values - FIXED VERSION
+    // Check if search parameters have meaningful values - STABLE VERSION
     const hasSearchParams = useCallback((params) => {
         // Check for meaningful search parameters (excluding max_distance alone)
         const hasQuery = params.query && params.query.trim() !== '';
@@ -71,7 +59,6 @@ export const SearchProvider = ({ children }) => {
         const hasPriceFilter = params.max_price !== null;
         
         // Only return true if we have at least one meaningful search parameter
-        // max_distance alone is not considered meaningful since it's just a default
         return hasQuery || hasLocation || hasDietaryRestrictions || hasRatingFilter || hasPriceFilter;
     }, []);
 
@@ -111,12 +98,12 @@ export const SearchProvider = ({ children }) => {
         setSearchResults(results);
     }, [getCacheKey]);
 
-    // EXPLICIT SEARCH EXECUTION FUNCTION
+    // FIXED: Remove searchParams dependency and make it more stable
     const executeSearch = useCallback(async (paramsToSearch = null) => {
-        // Use current searchParams if no params provided
-        const targetParams = paramsToSearch || searchParams;
+        // Always use passed params or current searchParams at call time
+        const currentParams = paramsToSearch || searchParams;
         
-        if (!hasSearchParams(targetParams)) {
+        if (!hasSearchParams(currentParams)) {
             setSearchResults({
                 loading: false,
                 error: null,
@@ -126,8 +113,15 @@ export const SearchProvider = ({ children }) => {
             return;
         }
 
+        // Prevent duplicate searches
+        const paramsKey = getCacheKey(currentParams);
+        if (lastSearchParamsRef.current === paramsKey) {
+            return;
+        }
+        lastSearchParamsRef.current = paramsKey;
+
         // Check cache first
-        const cachedResults = getCachedResults(targetParams);
+        const cachedResults = getCachedResults(currentParams);
         if (cachedResults) {
             setSearchResults(cachedResults);
             return;
@@ -148,7 +142,7 @@ export const SearchProvider = ({ children }) => {
                 error: null,
             }));
 
-            const response = await searchRestaurants(targetParams, {
+            const response = await searchRestaurants(currentParams, {
                 signal: newAbortController.signal
             });
 
@@ -160,7 +154,7 @@ export const SearchProvider = ({ children }) => {
                     totalResults: response.total_results || 0,
                 };
                 
-                setSearchResultsWithCache(newResults, targetParams);
+                setSearchResultsWithCache(newResults, currentParams);
             }
         } catch (error) {
             if (!newAbortController.signal.aborted) {
@@ -173,14 +167,28 @@ export const SearchProvider = ({ children }) => {
                 });
             }
         }
-    }, [hasSearchParams, getCachedResults, setSearchResultsWithCache]);
+    }, [hasSearchParams, getCachedResults, setSearchResultsWithCache, getCacheKey]);
 
-    // AUTO-SEARCH (only when enabled and params change)
+    // FIXED: Debounced auto-search with better control
     useEffect(() => {
-        if (autoSearchEnabled && hasSearchParams(debouncedParams)) {
-            executeSearch(debouncedParams);
+        // Clear any existing timeout
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
         }
-    }, [debouncedParams, autoSearchEnabled, executeSearch, hasSearchParams]);
+
+        // Only auto-search if enabled and we have meaningful params
+        if (autoSearchEnabled && hasSearchParams(searchParams)) {
+            searchTimeoutRef.current = setTimeout(() => {
+                executeSearch(searchParams);
+            }, 500);
+        }
+
+        return () => {
+            if (searchTimeoutRef.current) {
+                clearTimeout(searchTimeoutRef.current);
+            }
+        };
+    }, [searchParams, autoSearchEnabled, hasSearchParams, executeSearch]);
 
     // Batch update search parameters WITHOUT triggering search
     const updateSearchParams = useCallback((updates) => {
@@ -197,12 +205,22 @@ export const SearchProvider = ({ children }) => {
             ...updates,
         };
         setSearchParams(newParams);
+        
+        // Execute search immediately, bypassing debounce
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+        }
         executeSearch(newParams);
     }, [searchParams, executeSearch]);
 
-    // Enable/disable auto-search (for specific components like HomePage inline results)
+    // Enable/disable auto-search with better control
     const setAutoSearch = useCallback((enabled) => {
         setAutoSearchEnabled(enabled);
+        
+        // Clear any pending searches when disabling
+        if (!enabled && searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+        }
     }, []);
 
     // Clear search
@@ -210,6 +228,12 @@ export const SearchProvider = ({ children }) => {
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
         }
+
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+        }
+
+        lastSearchParamsRef.current = null;
 
         setSearchParams({
             latitude: null,

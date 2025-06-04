@@ -13,7 +13,8 @@ const SearchForm = ({ showInlineResults = false }) => {
         updateSearchParams, 
         executeSearch, 
         updateSearchParamsAndSearch,
-        setAutoSearch 
+        setAutoSearch,
+        hasSearchParams 
     } = useSearch();
     
     // Local form state (doesn't trigger searches until submitted)
@@ -36,28 +37,42 @@ const SearchForm = ({ showInlineResults = false }) => {
     // Use ref to track if component is mounted
     const isMountedRef = useRef(true);
     const abortControllerRef = useRef(null);
+    const hasInitialized = useRef(false);
 
-    // Enable auto-search for inline results (like HomePage)
+    // FIXED: More controlled auto-search enablement
     useEffect(() => {
         if (showInlineResults) {
-            setAutoSearch(true);
+            // Only enable auto-search after component has fully initialized
+            // and only if we actually have search parameters
+            const timer = setTimeout(() => {
+                if (isMountedRef.current && hasSearchParams(searchParams)) {
+                    setAutoSearch(true);
+                }
+            }, 100); // Small delay to prevent immediate triggering
+
+            return () => {
+                clearTimeout(timer);
+                if (isMountedRef.current) {
+                    setAutoSearch(false);
+                }
+            };
         }
-        return () => {
-            if (showInlineResults) {
-                setAutoSearch(false);
-            }
-        };
-    }, [showInlineResults, setAutoSearch]);
+    }, [showInlineResults, setAutoSearch, hasSearchParams, searchParams]);
 
     // Cleanup on unmount
     useEffect(() => {
+        hasInitialized.current = true;
+        
         return () => {
             isMountedRef.current = false;
             if (abortControllerRef.current) {
                 abortControllerRef.current.abort();
             }
+            if (showInlineResults) {
+                setAutoSearch(false);
+            }
         };
-    }, []);
+    }, [showInlineResults, setAutoSearch]);
 
     // Fetch filter options from API (only once)
     useEffect(() => {
@@ -99,29 +114,32 @@ const SearchForm = ({ showInlineResults = false }) => {
         fetchOptions();
     }, []); // Empty dependency array - only run once
 
-    // Update form data when search params change from external sources
-    // but DON'T trigger any searches
+    // FIXED: More careful synchronization with search params
     useEffect(() => {
-        setFormData({
-            query: searchParams.query || '',
-            latitude: searchParams.latitude || '',
-            longitude: searchParams.longitude || '',
-            max_distance: searchParams.max_distance || 10,
-            min_rating: searchParams.min_rating || '',
-            max_price: searchParams.max_price || '',
-            dietary_restrictions: searchParams.dietary_restrictions || [],
-        });
+        // Only update form data if the component has initialized
+        // and the changes are coming from external sources
+        if (hasInitialized.current) {
+            setFormData({
+                query: searchParams.query || '',
+                latitude: searchParams.latitude || '',
+                longitude: searchParams.longitude || '',
+                max_distance: searchParams.max_distance || 10,
+                min_rating: searchParams.min_rating || '',
+                max_price: searchParams.max_price || '',
+                dietary_restrictions: searchParams.dietary_restrictions || [],
+            });
+        }
     }, [searchParams]);
 
-    // Handle location update - just update form data, don't auto-search
+    // FIXED: More controlled location handling
     useEffect(() => {
-        if (location.latitude && location.longitude) {
+        if (location.latitude && location.longitude && hasInitialized.current) {
             setFormData(prev => ({
                 ...prev,
                 latitude: location.latitude,
                 longitude: location.longitude
             }));
-            // Note: Not automatically triggering search here anymore
+            // Note: Not automatically triggering search here
         }
     }, [location.latitude, location.longitude]);
 
@@ -150,15 +168,35 @@ const SearchForm = ({ showInlineResults = false }) => {
         }));
     };
 
-    const prepareSearchParams = (data) => ({
-        query: data.query.trim(),
-        latitude: data.latitude ? parseFloat(data.latitude) : null,
-        longitude: data.longitude ? parseFloat(data.longitude) : null,
-        max_distance: parseInt(data.max_distance),
-        min_rating: data.min_rating ? parseFloat(data.min_rating) : null,
-        max_price: data.max_price ? parseInt(data.max_price) : null,
-        dietary_restrictions: data.dietary_restrictions,
-    });
+    const prepareSearchParams = (data) => {
+        // FIXED: More careful parameter preparation
+        const params = {};
+        
+        if (data.query && data.query.trim()) {
+            params.query = data.query.trim();
+        }
+        
+        if (data.latitude && data.longitude) {
+            params.latitude = parseFloat(data.latitude);
+            params.longitude = parseFloat(data.longitude);
+        }
+        
+        params.max_distance = parseInt(data.max_distance) || 10;
+        
+        if (data.min_rating) {
+            params.min_rating = parseFloat(data.min_rating);
+        }
+        
+        if (data.max_price) {
+            params.max_price = parseInt(data.max_price);
+        }
+        
+        if (data.dietary_restrictions && data.dietary_restrictions.length > 0) {
+            params.dietary_restrictions = data.dietary_restrictions;
+        }
+        
+        return params;
+    };
 
     const handleSubmit = (e) => {
         e.preventDefault();
@@ -166,7 +204,7 @@ const SearchForm = ({ showInlineResults = false }) => {
         const searchParamsToUpdate = prepareSearchParams(formData);
         
         if (showInlineResults) {
-            // For inline results, update params and search will auto-trigger due to auto-search being enabled
+            // For inline results, update params and search will auto-trigger
             updateSearchParams(searchParamsToUpdate);
         } else {
             // For dedicated search page, update params and navigate
