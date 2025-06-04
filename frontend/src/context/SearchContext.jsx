@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { searchRestaurants } from '../services/api';
 
 const SearchContext = createContext();
@@ -38,8 +38,8 @@ export const SearchProvider = ({ children }) => {
     // Search cache
     const [searchCache, setSearchCache] = useState(new Map());
     
-    // Active request controller
-    const [abortController, setAbortController] = useState(null);
+    // Use ref for abort controller to avoid recreating executeSearch
+    const abortControllerRef = useRef(null);
 
     // Debounce search parameters ONLY when auto-search is enabled
     useEffect(() => {
@@ -52,7 +52,7 @@ export const SearchProvider = ({ children }) => {
         return () => clearTimeout(timer);
     }, [searchParams, autoSearchEnabled]);
 
-    // Generate cache key from search parameters
+    // Generate cache key from search parameters - stable function
     const getCacheKey = useCallback((params) => {
         return JSON.stringify({
             ...params,
@@ -61,7 +61,7 @@ export const SearchProvider = ({ children }) => {
         });
     }, []);
 
-    // Check if search parameters have meaningful values
+    // Check if search parameters have meaningful values - stable function
     const hasSearchParams = useCallback((params) => {
         return Object.values(params).some(value => {
             if (Array.isArray(value)) {
@@ -71,7 +71,7 @@ export const SearchProvider = ({ children }) => {
         });
     }, []);
 
-    // Get cached results
+    // Get cached results - stable function
     const getCachedResults = useCallback((params) => {
         const cacheKey = getCacheKey(params);
         const cached = searchCache.get(cacheKey);
@@ -83,7 +83,7 @@ export const SearchProvider = ({ children }) => {
         return null;
     }, [getCacheKey, searchCache]);
 
-    // Set search results with caching
+    // Set search results with caching - stable function
     const setSearchResultsWithCache = useCallback((results, params) => {
         const cacheKey = getCacheKey(params);
         
@@ -107,8 +107,9 @@ export const SearchProvider = ({ children }) => {
         setSearchResults(results);
     }, [getCacheKey]);
 
-    // EXPLICIT SEARCH EXECUTION FUNCTION
+    // EXPLICIT SEARCH EXECUTION FUNCTION - removed problematic dependencies
     const executeSearch = useCallback(async (paramsToSearch = null) => {
+        // Use current searchParams if no params provided
         const targetParams = paramsToSearch || searchParams;
         
         if (!hasSearchParams(targetParams)) {
@@ -129,12 +130,12 @@ export const SearchProvider = ({ children }) => {
         }
 
         // Cancel previous request
-        if (abortController) {
-            abortController.abort();
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
         }
 
         const newAbortController = new AbortController();
-        setAbortController(newAbortController);
+        abortControllerRef.current = newAbortController;
 
         try {
             setSearchResults(prevResults => ({
@@ -168,14 +169,14 @@ export const SearchProvider = ({ children }) => {
                 });
             }
         }
-    }, [searchParams, hasSearchParams, getCachedResults, setSearchResultsWithCache, abortController]);
+    }, [hasSearchParams, getCachedResults, setSearchResultsWithCache]); // Removed searchParams and abortController
 
     // AUTO-SEARCH (only when enabled and params change)
     useEffect(() => {
         if (autoSearchEnabled && hasSearchParams(debouncedParams)) {
             executeSearch(debouncedParams);
         }
-    }, [debouncedParams, autoSearchEnabled, executeSearch, hasSearchParams]);
+    }, [debouncedParams, autoSearchEnabled]); // Removed executeSearch and hasSearchParams from dependencies
 
     // Batch update search parameters WITHOUT triggering search
     const updateSearchParams = useCallback((updates) => {
@@ -202,8 +203,8 @@ export const SearchProvider = ({ children }) => {
 
     // Clear search
     const clearSearch = useCallback(() => {
-        if (abortController) {
-            abortController.abort();
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
         }
 
         setSearchParams({
@@ -228,17 +229,17 @@ export const SearchProvider = ({ children }) => {
         if (searchCache.size > 50) {
             setSearchCache(new Map());
         }
-    }, [abortController, searchCache.size]);
+    }, [searchCache.size]);
 
     const value = {
         searchParams,
         setSearchParams,
         searchResults,
-        executeSearch,           // NEW: Explicit search execution
-        updateSearchParams,      // Batch update without search
-        updateSearchParamsAndSearch,  // Update and search immediately
-        setAutoSearch,          // NEW: Control auto-search behavior
-        autoSearchEnabled,      // NEW: Auto-search state
+        executeSearch,           
+        updateSearchParams,      
+        updateSearchParamsAndSearch,  
+        setAutoSearch,          
+        autoSearchEnabled,      
         clearSearch,
         hasSearchParams,
         getCachedResults,

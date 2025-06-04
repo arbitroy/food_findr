@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSearch } from '../../context/SearchContext';
 import useGeolocation from '../../hooks/useGeolocation';
@@ -32,6 +32,10 @@ const SearchForm = ({ showInlineResults = false }) => {
     const [error, setError] = useState(null);
 
     const location = useGeolocation();
+    
+    // Use ref to track if component is mounted
+    const isMountedRef = useRef(true);
+    const abortControllerRef = useRef(null);
 
     // Enable auto-search for inline results (like HomePage)
     useEffect(() => {
@@ -45,23 +49,55 @@ const SearchForm = ({ showInlineResults = false }) => {
         };
     }, [showInlineResults, setAutoSearch]);
 
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            isMountedRef.current = false;
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+            }
+        };
+    }, []);
+
     // Fetch filter options from API (only once)
     useEffect(() => {
         const fetchOptions = async () => {
+            // Cancel previous request
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+            }
+
+            const controller = new AbortController();
+            abortControllerRef.current = controller;
+
             try {
                 setLoading(true);
-                const data = await getFilterOptions();
-                setFilterOptions(data);
+                setError(null);
+                
+                const data = await getFilterOptions({
+                    signal: controller.signal
+                });
+                
+                if (isMountedRef.current && !controller.signal.aborted) {
+                    setFilterOptions(data);
+                }
             } catch (err) {
-                setError('Failed to load filter options');
-                console.error(err);
+                if (isMountedRef.current && !controller.signal.aborted) {
+                    // Only show error if it's not a cancellation
+                    if (err.message !== 'Request was cancelled') {
+                        setError('Failed to load filter options');
+                        console.error('Failed to load filter options:', err);
+                    }
+                }
             } finally {
-                setLoading(false);
+                if (isMountedRef.current && !controller.signal.aborted) {
+                    setLoading(false);
+                }
             }
         };
 
         fetchOptions();
-    }, []);
+    }, []); // Empty dependency array - only run once
 
     // Update form data when search params change from external sources
     // but DON'T trigger any searches
@@ -350,11 +386,14 @@ const SearchForm = ({ showInlineResults = false }) => {
                                 }
                             />
                         ))}
-                        {!filterOptions && !error && (
-                            <div className="text-gray-500">Loading options...</div>
+                        {loading && (
+                            <div className="text-gray-500 text-sm">Loading options...</div>
                         )}
                         {error && (
-                            <div className="text-red-500">{error}</div>
+                            <div className="text-red-500 text-sm">{error}</div>
+                        )}
+                        {!filterOptions && !loading && !error && (
+                            <div className="text-gray-500 text-sm">Options unavailable</div>
                         )}
                     </div>
                 </div>
