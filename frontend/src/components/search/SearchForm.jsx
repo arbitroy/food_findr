@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom'; // Add this import
+import { useNavigate } from 'react-router-dom';
 import { useSearch } from '../../context/SearchContext';
 import useGeolocation from '../../hooks/useGeolocation';
 import Button from '../ui/Button';
 import DietaryBadge from '../ui/DietaryBadge';
 import { getFilterOptions } from '../../services/api';
 
-const SearchForm = () => {
-    const navigate = useNavigate(); // Add this hook
-    const { searchParams, setSearchParams } = useSearch();
+const SearchForm = ({ showInlineResults = false }) => {
+    const navigate = useNavigate();
+    const { searchParams, updateSearchParams } = useSearch();
+    
+    // Local form state (doesn't trigger searches until submitted)
     const [formData, setFormData] = useState({
         query: searchParams.query || '',
         latitude: searchParams.latitude || '',
@@ -16,10 +18,13 @@ const SearchForm = () => {
         max_distance: searchParams.max_distance || 10,
         min_rating: searchParams.min_rating || '',
         max_price: searchParams.max_price || '',
+        dietary_restrictions: searchParams.dietary_restrictions || [],
     });
+    
     const [filterOptions, setFilterOptions] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
     const location = useGeolocation();
 
@@ -41,6 +46,20 @@ const SearchForm = () => {
         fetchOptions();
     }, []);
 
+    // Update form data when search params change (from external sources)
+    useEffect(() => {
+        setFormData({
+            query: searchParams.query || '',
+            latitude: searchParams.latitude || '',
+            longitude: searchParams.longitude || '',
+            max_distance: searchParams.max_distance || 10,
+            min_rating: searchParams.min_rating || '',
+            max_price: searchParams.max_price || '',
+            dietary_restrictions: searchParams.dietary_restrictions || [],
+        });
+        setHasUnsavedChanges(false);
+    }, [searchParams]);
+
     // Use geolocation data when available
     useEffect(() => {
         if (location.latitude && location.longitude) {
@@ -49,21 +68,35 @@ const SearchForm = () => {
                 latitude: location.latitude,
                 longitude: location.longitude
             }));
+            setHasUnsavedChanges(true);
         }
     }, [location.latitude, location.longitude]);
 
+    // Check if form has changed from current search params
+    useEffect(() => {
+        const formChanged = 
+            formData.query !== (searchParams.query || '') ||
+            formData.latitude !== (searchParams.latitude || '') ||
+            formData.longitude !== (searchParams.longitude || '') ||
+            formData.max_distance !== (searchParams.max_distance || 10) ||
+            formData.min_rating !== (searchParams.min_rating || '') ||
+            formData.max_price !== (searchParams.max_price || '') ||
+            JSON.stringify(formData.dietary_restrictions.sort()) !== JSON.stringify((searchParams.dietary_restrictions || []).sort());
+        
+        setHasUnsavedChanges(formChanged);
+    }, [formData, searchParams]);
+
     const handleInputChange = (e) => {
         const { name, value } = e.target;
-        setFormData({
-            ...formData,
+        setFormData(prev => ({
+            ...prev,
             [name]: value
-        });
+        }));
     };
 
     const toggleDietaryRestriction = (restriction) => {
-        // Normalize the restriction name to ensure consistency
         const normalizedRestriction = restriction.replace('-', '_').toLowerCase();
-        const current = [...(searchParams.dietary_restrictions || [])];
+        const current = [...formData.dietary_restrictions];
         const index = current.indexOf(normalizedRestriction);
 
         if (index > -1) {
@@ -72,29 +105,31 @@ const SearchForm = () => {
             current.push(normalizedRestriction);
         }
 
-        setSearchParams({
-            ...searchParams,
+        setFormData(prev => ({
+            ...prev,
             dietary_restrictions: current
-        });
+        }));
     };
 
     const handleSubmit = (e) => {
         e.preventDefault();
         
-        // Ensure latitude and longitude are valid numbers if provided
-        const updatedFormData = {
-            ...formData,
+        // Prepare the update with proper data types
+        const updates = {
+            query: formData.query.trim(),
             latitude: formData.latitude ? parseFloat(formData.latitude) : null,
             longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+            max_distance: parseInt(formData.max_distance),
+            min_rating: formData.min_rating ? parseFloat(formData.min_rating) : null,
+            max_price: formData.max_price ? parseInt(formData.max_price) : null,
+            dietary_restrictions: formData.dietary_restrictions,
         };
         
-        setSearchParams({
-            ...searchParams,
-            ...updatedFormData
-        });
+        // Batch update all search parameters at once
+        updateSearchParams(updates);
         
-        // Navigate to search page if not already there
-        if (window.location.pathname !== '/search') {
+        // Navigate to search page if not showing inline results and not already there
+        if (!showInlineResults && window.location.pathname !== '/search') {
             navigate('/search');
         }
     };
@@ -103,9 +138,79 @@ const SearchForm = () => {
         location.requestLocation();
     };
 
+    const handleQuickSearch = (quickQuery) => {
+        const updates = {
+            ...formData,
+            query: quickQuery,
+        };
+        setFormData(updates);
+        
+        // For quick searches, immediately update search params
+        updateSearchParams({
+            query: quickQuery,
+            latitude: formData.latitude ? parseFloat(formData.latitude) : null,
+            longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+            max_distance: parseInt(formData.max_distance),
+            min_rating: formData.min_rating ? parseFloat(formData.min_rating) : null,
+            max_price: formData.max_price ? parseInt(formData.max_price) : null,
+            dietary_restrictions: formData.dietary_restrictions,
+        });
+    };
+
+    const handleReset = () => {
+        const resetData = {
+            query: '',
+            latitude: '',
+            longitude: '',
+            max_distance: 10,
+            min_rating: '',
+            max_price: '',
+            dietary_restrictions: [],
+        };
+        
+        setFormData(resetData);
+        updateSearchParams({
+            query: '',
+            latitude: null,
+            longitude: null,
+            max_distance: 10,
+            min_rating: null,
+            max_price: null,
+            dietary_restrictions: [],
+        });
+    };
+
     return (
         <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-2xl font-bold text-primary-dark mb-6">Find Restaurants</h2>
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-primary-dark">Find Restaurants</h2>
+                {hasUnsavedChanges && (
+                    <span className="text-sm text-amber-600 font-medium">
+                        Unsaved changes
+                    </span>
+                )}
+            </div>
+
+            {/* Quick Search Buttons */}
+            {!showInlineResults && (
+                <div className="mb-6">
+                    <label className="block text-gray-700 font-medium mb-3">
+                        Quick Search
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                        {['Pizza', 'Sushi', 'Thai Food', 'Burgers', 'Italian', 'Mexican'].map(query => (
+                            <button
+                                key={query}
+                                type="button"
+                                onClick={() => handleQuickSearch(query)}
+                                className="px-3 py-1 bg-primary-light text-primary-dark rounded-full text-sm hover:bg-primary hover:text-white transition-colors"
+                            >
+                                {query}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             <form onSubmit={handleSubmit}>
                 {/* Search query */}
@@ -119,7 +224,7 @@ const SearchForm = () => {
                         name="query"
                         value={formData.query}
                         onChange={handleInputChange}
-                        placeholder="Pizza, Thai food, etc."
+                        placeholder="Pizza, Thai food, restaurant name..."
                         className="w-full p-3 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                 </div>
@@ -223,9 +328,9 @@ const SearchForm = () => {
                         >
                             <option value="">Any Price</option>
                             <option value="1">$ (Inexpensive)</option>
-                            <option value="2">$$ (Moderate)</option>
-                            <option value="3">$$$ (Expensive)</option>
-                            <option value="4">$$$$ (Very Expensive)</option>
+                            <option value="2">$ (Moderate)</option>
+                            <option value="3">$$ (Expensive)</option>
+                            <option value="4">$$ (Very Expensive)</option>
                         </select>
                     </div>
                 </div>
@@ -243,9 +348,9 @@ const SearchForm = () => {
                                 size="md"
                                 onClick={() => toggleDietaryRestriction(restriction)}
                                 className={
-                                    searchParams.dietary_restrictions?.includes(restriction)
+                                    formData.dietary_restrictions.includes(restriction)
                                         ? 'ring-2 ring-offset-2 ring-primary'
-                                        : 'opacity-70'
+                                        : 'opacity-70 hover:opacity-100'
                                 }
                             />
                         ))}
@@ -258,10 +363,46 @@ const SearchForm = () => {
                     </div>
                 </div>
 
-                {/* Submit Button */}
-                <Button type="submit" className="w-full">
-                    Search Restaurants
-                </Button>
+                {/* Action Buttons */}
+                <div className="flex flex-col sm:flex-row gap-3">
+                    <Button 
+                        type="submit" 
+                        className="flex-1"
+                        disabled={!formData.query && !formData.latitude && formData.dietary_restrictions.length === 0}
+                    >
+                        {showInlineResults ? 'Update Search' : 'Search Restaurants'}
+                    </Button>
+                    
+                    {hasUnsavedChanges && (
+                        <Button 
+                            type="button"
+                            variant="outline"
+                            onClick={handleReset}
+                        >
+                            Reset
+                        </Button>
+                    )}
+                    
+                    {showInlineResults && !hasUnsavedChanges && formData.query && (
+                        <Button 
+                            type="button"
+                            variant="outline"
+                            onClick={() => navigate('/search')}
+                        >
+                            Advanced Search
+                        </Button>
+                    )}
+                </div>
+
+                {/* Help Text */}
+                <div className="mt-4 text-sm text-gray-600">
+                    <p>
+                        💡 <strong>Tip:</strong> {showInlineResults 
+                            ? 'Results will appear below as you search. Use "Advanced Search" for more filtering options.'
+                            : 'Enter a location or food type to get started. Use your current location for best results.'
+                        }
+                    </p>
+                </div>
             </form>
         </div>
     );
