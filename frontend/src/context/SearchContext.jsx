@@ -61,14 +61,18 @@ export const SearchProvider = ({ children }) => {
         });
     }, []);
 
-    // Check if search parameters have meaningful values - stable function
+    // Check if search parameters have meaningful values - FIXED VERSION
     const hasSearchParams = useCallback((params) => {
-        return Object.values(params).some(value => {
-            if (Array.isArray(value)) {
-                return value.length > 0;
-            }
-            return value !== null && value !== '';
-        });
+        // Check for meaningful search parameters (excluding max_distance alone)
+        const hasQuery = params.query && params.query.trim() !== '';
+        const hasLocation = params.latitude !== null && params.longitude !== null;
+        const hasDietaryRestrictions = params.dietary_restrictions && params.dietary_restrictions.length > 0;
+        const hasRatingFilter = params.min_rating !== null;
+        const hasPriceFilter = params.max_price !== null;
+        
+        // Only return true if we have at least one meaningful search parameter
+        // max_distance alone is not considered meaningful since it's just a default
+        return hasQuery || hasLocation || hasDietaryRestrictions || hasRatingFilter || hasPriceFilter;
     }, []);
 
     // Get cached results - stable function
@@ -107,7 +111,7 @@ export const SearchProvider = ({ children }) => {
         setSearchResults(results);
     }, [getCacheKey]);
 
-    // EXPLICIT SEARCH EXECUTION FUNCTION - removed problematic dependencies
+    // EXPLICIT SEARCH EXECUTION FUNCTION
     const executeSearch = useCallback(async (paramsToSearch = null) => {
         // Use current searchParams if no params provided
         const targetParams = paramsToSearch || searchParams;
@@ -169,14 +173,14 @@ export const SearchProvider = ({ children }) => {
                 });
             }
         }
-    }, [hasSearchParams, getCachedResults, setSearchResultsWithCache]); // Removed searchParams and abortController
+    }, [hasSearchParams, getCachedResults, setSearchResultsWithCache]);
 
     // AUTO-SEARCH (only when enabled and params change)
     useEffect(() => {
         if (autoSearchEnabled && hasSearchParams(debouncedParams)) {
             executeSearch(debouncedParams);
         }
-    }, [debouncedParams, autoSearchEnabled]); // Removed executeSearch and hasSearchParams from dependencies
+    }, [debouncedParams, autoSearchEnabled, executeSearch, hasSearchParams]);
 
     // Batch update search parameters WITHOUT triggering search
     const updateSearchParams = useCallback((updates) => {
