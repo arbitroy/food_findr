@@ -95,6 +95,7 @@ const SearchForm = ({ showInlineResults = false }) => {
                 
                 if (isMountedRef.current && !controller.signal.aborted) {
                     setFilterOptions(data);
+                    setError(null); // Clear any previous errors
                 }
             } catch (err) {
                 if (isMountedRef.current && !controller.signal.aborted) {
@@ -105,7 +106,9 @@ const SearchForm = ({ showInlineResults = false }) => {
                     }
                 }
             } finally {
-                if (isMountedRef.current && !controller.signal.aborted) {
+                // FIXED: Always reset loading state if component is still mounted
+                // regardless of abort status to prevent stuck loading states
+                if (isMountedRef.current) {
                     setLoading(false);
                 }
             }
@@ -113,6 +116,14 @@ const SearchForm = ({ showInlineResults = false }) => {
 
         fetchOptions();
     }, []); // Empty dependency array - only run once
+
+    // Additional: Reset loading if filterOptions are successfully loaded
+    useEffect(() => {
+        if (filterOptions && filterOptions.dietary_restrictions) {
+            setLoading(false);
+            setError(null);
+        }
+    }, [filterOptions]);
 
     // FIXED: More careful synchronization with search params
     useEffect(() => {
