@@ -29,29 +29,33 @@ export const SearchProvider = ({ children }) => {
         totalResults: 0,
     });
 
-    // Debounced search parameters
+    // Track if search should auto-execute (only for certain scenarios)
+    const [autoSearchEnabled, setAutoSearchEnabled] = useState(false);
+    
+    // Debounced search parameters (only for auto-search scenarios)
     const [debouncedParams, setDebouncedParams] = useState(searchParams);
     
     // Search cache
     const [searchCache, setSearchCache] = useState(new Map());
     
-    // Active request controller for cancelling previous requests
+    // Active request controller
     const [abortController, setAbortController] = useState(null);
 
-    // Debounce search parameters (500ms delay)
+    // Debounce search parameters ONLY when auto-search is enabled
     useEffect(() => {
+        if (!autoSearchEnabled) return;
+        
         const timer = setTimeout(() => {
             setDebouncedParams(searchParams);
         }, 500);
 
         return () => clearTimeout(timer);
-    }, [searchParams]);
+    }, [searchParams, autoSearchEnabled]);
 
     // Generate cache key from search parameters
     const getCacheKey = useCallback((params) => {
         return JSON.stringify({
             ...params,
-            // Round coordinates to reduce cache misses from small location changes
             latitude: params.latitude ? Math.round(params.latitude * 1000) / 1000 : null,
             longitude: params.longitude ? Math.round(params.longitude * 1000) / 1000 : null,
         });
@@ -67,7 +71,7 @@ export const SearchProvider = ({ children }) => {
         });
     }, []);
 
-    // Get cached results if available and not stale (5 minutes)
+    // Get cached results
     const getCachedResults = useCallback((params) => {
         const cacheKey = getCacheKey(params);
         const cached = searchCache.get(cacheKey);
@@ -83,7 +87,6 @@ export const SearchProvider = ({ children }) => {
     const setSearchResultsWithCache = useCallback((results, params) => {
         const cacheKey = getCacheKey(params);
         
-        // Cache successful results
         if (!results.error && !results.loading && results.data.length > 0) {
             setSearchCache(prevCache => {
                 const newCache = new Map(prevCache);
@@ -92,7 +95,6 @@ export const SearchProvider = ({ children }) => {
                     cachedAt: Date.now(),
                 });
                 
-                // Limit cache size
                 if (newCache.size > 100) {
                     const firstKey = newCache.keys().next().value;
                     newCache.delete(firstKey);
@@ -105,103 +107,77 @@ export const SearchProvider = ({ children }) => {
         setSearchResults(results);
     }, [getCacheKey]);
 
-    // CENTRALIZED SEARCH EXECUTION - This is the only place search happens
-    useEffect(() => {
-        const performSearch = async () => {
-            if (!hasSearchParams(debouncedParams)) {
-                // Clear results if no search params
-                setSearchResults({
+    // EXPLICIT SEARCH EXECUTION FUNCTION
+    const executeSearch = useCallback(async (paramsToSearch = null) => {
+        const targetParams = paramsToSearch || searchParams;
+        
+        if (!hasSearchParams(targetParams)) {
+            setSearchResults({
+                loading: false,
+                error: null,
+                data: [],
+                totalResults: 0,
+            });
+            return;
+        }
+
+        // Check cache first
+        const cachedResults = getCachedResults(targetParams);
+        if (cachedResults) {
+            setSearchResults(cachedResults);
+            return;
+        }
+
+        // Cancel previous request
+        if (abortController) {
+            abortController.abort();
+        }
+
+        const newAbortController = new AbortController();
+        setAbortController(newAbortController);
+
+        try {
+            setSearchResults(prevResults => ({
+                ...prevResults,
+                loading: true,
+                error: null,
+            }));
+
+            const response = await searchRestaurants(targetParams, {
+                signal: newAbortController.signal
+            });
+
+            if (!newAbortController.signal.aborted) {
+                const newResults = {
                     loading: false,
                     error: null,
+                    data: response.restaurants || [],
+                    totalResults: response.total_results || 0,
+                };
+                
+                setSearchResultsWithCache(newResults, targetParams);
+            }
+        } catch (error) {
+            if (!newAbortController.signal.aborted) {
+                console.error('Search error:', error);
+                setSearchResults({
+                    loading: false,
+                    error: 'Failed to fetch search results. Please try again.',
                     data: [],
                     totalResults: 0,
                 });
-                return;
             }
+        }
+    }, [searchParams, hasSearchParams, getCachedResults, setSearchResultsWithCache, abortController]);
 
-            // Check cache first
-            const cachedResults = getCachedResults(debouncedParams);
-            if (cachedResults) {
-                setSearchResults(cachedResults);
-                return;
-            }
+    // AUTO-SEARCH (only when enabled and params change)
+    useEffect(() => {
+        if (autoSearchEnabled && hasSearchParams(debouncedParams)) {
+            executeSearch(debouncedParams);
+        }
+    }, [debouncedParams, autoSearchEnabled, executeSearch, hasSearchParams]);
 
-            // Cancel previous request
-            if (abortController) {
-                abortController.abort();
-            }
-
-            // Create new abort controller
-            const newAbortController = new AbortController();
-            setAbortController(newAbortController);
-
-            try {
-                // Set loading state while keeping previous results visible
-                setSearchResults(prevResults => ({
-                    ...prevResults,
-                    loading: true,
-                    error: null,
-                }));
-
-                const response = await searchRestaurants(debouncedParams, {
-                    signal: newAbortController.signal
-                });
-
-                if (!newAbortController.signal.aborted) {
-                    const newResults = {
-                        loading: false,
-                        error: null,
-                        data: response.restaurants || [],
-                        totalResults: response.total_results || 0,
-                    };
-                    
-                    setSearchResultsWithCache(newResults, debouncedParams);
-                }
-            } catch (error) {
-                if (!newAbortController.signal.aborted) {
-                    console.error('Search error:', error);
-                    setSearchResults({
-                        loading: false,
-                        error: 'Failed to fetch search results. Please try again.',
-                        data: [],
-                        totalResults: 0,
-                    });
-                }
-            }
-        };
-
-        performSearch();
-
-        // Cleanup function to abort request on unmount
-        return () => {
-            if (abortController) {
-                abortController.abort();
-            }
-        };
-    }, [debouncedParams, hasSearchParams, getCachedResults, setSearchResultsWithCache, abortController]);
-
-    // Add dietary restriction helper
-    const addDietaryRestriction = useCallback((restriction) => {
-        setSearchParams(prevParams => {
-            if (!prevParams.dietary_restrictions.includes(restriction)) {
-                return {
-                    ...prevParams,
-                    dietary_restrictions: [...prevParams.dietary_restrictions, restriction],
-                };
-            }
-            return prevParams;
-        });
-    }, []);
-
-    // Remove dietary restriction helper
-    const removeDietaryRestriction = useCallback((restriction) => {
-        setSearchParams(prevParams => ({
-            ...prevParams,
-            dietary_restrictions: prevParams.dietary_restrictions.filter(r => r !== restriction),
-        }));
-    }, []);
-
-    // Batch update search parameters
+    // Batch update search parameters WITHOUT triggering search
     const updateSearchParams = useCallback((updates) => {
         setSearchParams(prevParams => ({
             ...prevParams,
@@ -209,9 +185,23 @@ export const SearchProvider = ({ children }) => {
         }));
     }, []);
 
-    // Clear search and cache
+    // Update search params AND execute search immediately
+    const updateSearchParamsAndSearch = useCallback((updates) => {
+        const newParams = {
+            ...searchParams,
+            ...updates,
+        };
+        setSearchParams(newParams);
+        executeSearch(newParams);
+    }, [searchParams, executeSearch]);
+
+    // Enable/disable auto-search (for specific components like HomePage inline results)
+    const setAutoSearch = useCallback((enabled) => {
+        setAutoSearchEnabled(enabled);
+    }, []);
+
+    // Clear search
     const clearSearch = useCallback(() => {
-        // Cancel any ongoing request
         if (abortController) {
             abortController.abort();
         }
@@ -233,7 +223,8 @@ export const SearchProvider = ({ children }) => {
             totalResults: 0,
         });
         
-        // Clear cache if it gets too large (> 50 entries)
+        setAutoSearchEnabled(false);
+        
         if (searchCache.size > 50) {
             setSearchCache(new Map());
         }
@@ -243,18 +234,14 @@ export const SearchProvider = ({ children }) => {
         searchParams,
         setSearchParams,
         searchResults,
-        setSearchResults,
-        debouncedParams,
-        searchCache,
-        abortController,
-        setAbortController,
-        addDietaryRestriction,
-        removeDietaryRestriction,
-        updateSearchParams,
+        executeSearch,           // NEW: Explicit search execution
+        updateSearchParams,      // Batch update without search
+        updateSearchParamsAndSearch,  // Update and search immediately
+        setAutoSearch,          // NEW: Control auto-search behavior
+        autoSearchEnabled,      // NEW: Auto-search state
         clearSearch,
         hasSearchParams,
         getCachedResults,
-        setSearchResultsWithCache,
     };
 
     return (

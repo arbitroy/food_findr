@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSearch } from '../context/SearchContext';
 import FilterSidebar from '../components/search/FilterSidebar';
 import SearchResults from '../components/search/SearchResults';
@@ -10,12 +10,20 @@ const SearchPage = () => {
     const { 
         searchParams, 
         searchResults,
-        hasSearchParams
+        hasSearchParams,
+        executeSearch
     } = useSearch();
 
-    // Just check if we have search params, don't execute search here
-    // Search execution is handled centrally in SearchContext
+    // Check if we have search params
     const hasSearched = hasSearchParams(searchParams);
+
+    // Execute search when page loads if we have parameters (e.g., coming from HomePage)
+    useEffect(() => {
+        if (hasSearched && searchResults.data.length === 0 && !searchResults.loading && !searchResults.error) {
+            // Execute search if we have params but no results yet
+            executeSearch();
+        }
+    }, [hasSearched, searchResults.data.length, searchResults.loading, searchResults.error, executeSearch]);
 
     return (
         <div className="max-w-7xl mx-auto">
@@ -48,6 +56,51 @@ const SearchPage = () => {
                     )}
                 </div>
             </div>
+
+            {/* Search Parameters Summary */}
+            {hasSearched && (
+                <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="font-medium text-blue-900">Active Search:</span>
+                        
+                        {searchParams.query && (
+                            <span className="bg-blue-200 text-blue-800 px-2 py-1 rounded">
+                                "{searchParams.query}"
+                            </span>
+                        )}
+                        
+                        {searchParams.latitude && searchParams.longitude && (
+                            <span className="bg-blue-200 text-blue-800 px-2 py-1 rounded">
+                                Location: {searchParams.latitude.toFixed(3)}, {searchParams.longitude.toFixed(3)}
+                            </span>
+                        )}
+                        
+                        {searchParams.max_distance && (
+                            <span className="bg-blue-200 text-blue-800 px-2 py-1 rounded">
+                                Within {searchParams.max_distance}km
+                            </span>
+                        )}
+                        
+                        {searchParams.min_rating && (
+                            <span className="bg-blue-200 text-blue-800 px-2 py-1 rounded">
+                                {searchParams.min_rating}+ stars
+                            </span>
+                        )}
+                        
+                        {searchParams.max_price && (
+                            <span className="bg-blue-200 text-blue-800 px-2 py-1 rounded">
+                                {'$'.repeat(searchParams.max_price)} max
+                            </span>
+                        )}
+                        
+                        {searchParams.dietary_restrictions?.map(restriction => (
+                            <span key={restriction} className="bg-green-200 text-green-800 px-2 py-1 rounded">
+                                {restriction.replace('_', ' ')}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Mobile Filter Toggle */}
             <div className="md:hidden mb-4">
@@ -110,7 +163,8 @@ const SearchPage = () => {
                                         <li>• Set your location for nearby results</li>
                                         <li>• Choose dietary restrictions if needed</li>
                                         <li>• Adjust rating and price filters</li>
-                                        <li>• Try the quick filters for common preferences</li>
+                                        <li>• Use quick filters for common preferences</li>
+                                        <li>• Click "Apply & Search" to execute your search</li>
                                     </ul>
                                 </div>
                             </div>
@@ -157,9 +211,9 @@ const SearchPage = () => {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                                 </svg>
                             </div>
-                            <h3 className="font-medium text-primary-dark mb-2">Filter by Quality</h3>
+                            <h3 className="font-medium text-primary-dark mb-2">Apply Filters & Search</h3>
                             <p className="text-sm text-gray-600">
-                                Set minimum ratings and price ranges to find restaurants that match your standards.
+                                Don't forget to click "Apply & Search" after setting your filters to see results.
                             </p>
                         </div>
                     </div>

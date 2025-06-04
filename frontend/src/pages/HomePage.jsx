@@ -12,9 +12,11 @@ const HomePage = () => {
     const navigate = useNavigate();
     const { 
         searchParams, 
-        setSearchParams, 
+        updateSearchParamsAndSearch,
+        updateSearchParams,
         searchResults, 
-        hasSearchParams
+        hasSearchParams,
+        clearSearch
     } = useSearch();
     
     const [dietaryTrends, setDietaryTrends] = useState(null);
@@ -46,18 +48,38 @@ const HomePage = () => {
         fetchDietaryTrends();
     }, []);
 
-    // Set up dietary restriction filter
+    // Handle dietary filter clicks - now with immediate search execution
     const handleDietaryFilter = (restriction) => {
-        setSearchParams({
+        const newParams = {
             ...searchParams,
-            dietary_restrictions: [restriction]
-        });
-        // Don't navigate immediately - let results show inline first
+            dietary_restrictions: [restriction],
+            // Ensure we have some location context if available
+            ...(searchParams.latitude && searchParams.longitude ? {} : {
+                max_distance: 25 // Expand search if no location
+            })
+        };
+        
+        // Execute search immediately for dietary filter clicks
+        updateSearchParamsAndSearch(newParams);
     };
 
     // Handle "View All Results" navigation
     const handleViewAllResults = () => {
         navigate('/search');
+    };
+
+    // Handle clearing search
+    const handleClearSearch = () => {
+        clearSearch();
+    };
+
+    // Handle expanding search area when no results
+    const handleExpandSearchArea = () => {
+        const expandedParams = {
+            ...searchParams,
+            max_distance: Math.min(searchParams.max_distance * 2, 50)
+        };
+        updateSearchParamsAndSearch(expandedParams);
     };
 
     return (
@@ -75,11 +97,36 @@ const HomePage = () => {
                 {/* Dietary Badges - Only show if no search results */}
                 {!hasSearched && (
                     <div className="flex flex-wrap justify-center gap-3 mb-12">
-                        <DietaryBadge type="vegan" size="lg" onClick={() => handleDietaryFilter('vegan')} />
-                        <DietaryBadge type="vegetarian" size="lg" onClick={() => handleDietaryFilter('vegetarian')} />
-                        <DietaryBadge type="halal" size="lg" onClick={() => handleDietaryFilter('halal')} />
-                        <DietaryBadge type="kosher" size="lg" onClick={() => handleDietaryFilter('kosher')} />
-                        <DietaryBadge type="gluten_free" size="lg" onClick={() => handleDietaryFilter('gluten_free')} />
+                        <DietaryBadge 
+                            type="vegan" 
+                            size="lg" 
+                            onClick={() => handleDietaryFilter('vegan')} 
+                            className="cursor-pointer hover:scale-105 transition-transform"
+                        />
+                        <DietaryBadge 
+                            type="vegetarian" 
+                            size="lg" 
+                            onClick={() => handleDietaryFilter('vegetarian')} 
+                            className="cursor-pointer hover:scale-105 transition-transform"
+                        />
+                        <DietaryBadge 
+                            type="halal" 
+                            size="lg" 
+                            onClick={() => handleDietaryFilter('halal')} 
+                            className="cursor-pointer hover:scale-105 transition-transform"
+                        />
+                        <DietaryBadge 
+                            type="kosher" 
+                            size="lg" 
+                            onClick={() => handleDietaryFilter('kosher')} 
+                            className="cursor-pointer hover:scale-105 transition-transform"
+                        />
+                        <DietaryBadge 
+                            type="gluten_free" 
+                            size="lg" 
+                            onClick={() => handleDietaryFilter('gluten_free')} 
+                            className="cursor-pointer hover:scale-105 transition-transform"
+                        />
                     </div>
                 )}
             </section>
@@ -100,7 +147,7 @@ const HomePage = () => {
                                 <h2 className="text-2xl font-bold text-primary-dark">
                                     Search Results
                                 </h2>
-                                {searchResults.totalResults > 0 && (
+                                {searchResults.totalResults > 0 && !searchResults.loading && (
                                     <p className="text-gray-600 mt-1">
                                         Found {searchResults.totalResults} {searchResults.totalResults === 1 ? 'restaurant' : 'restaurants'}
                                     </p>
@@ -109,17 +156,7 @@ const HomePage = () => {
                             <div className="flex gap-2">
                                 <Button
                                     variant="outline"
-                                    onClick={() => {
-                                        setSearchParams({
-                                            latitude: null,
-                                            longitude: null,
-                                            query: '',
-                                            dietary_restrictions: [],
-                                            min_rating: null,
-                                            max_price: null,
-                                            max_distance: 10,
-                                        });
-                                    }}
+                                    onClick={handleClearSearch}
                                 >
                                     Clear Search
                                 </Button>
@@ -158,17 +195,14 @@ const HomePage = () => {
                             <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-8 rounded-lg text-center">
                                 <h3 className="text-lg font-medium mb-2">No Results Found</h3>
                                 <p className="mb-4">Try adjusting your search criteria or expanding your search area.</p>
-                                <Button 
-                                    variant="outline"
-                                    onClick={() => {
-                                        setSearchParams({
-                                            ...searchParams,
-                                            max_distance: Math.min(searchParams.max_distance * 2, 50)
-                                        });
-                                    }}
-                                >
-                                    Expand Search Area
-                                </Button>
+                                {searchParams.max_distance < 50 && (
+                                    <Button 
+                                        variant="outline"
+                                        onClick={handleExpandSearchArea}
+                                    >
+                                        Expand Search Area to {Math.min(searchParams.max_distance * 2, 50)}km
+                                    </Button>
+                                )}
                             </div>
                         )}
 
@@ -222,7 +256,7 @@ const HomePage = () => {
                                 {Object.entries(dietaryTrends).map(([diet, percentage]) => (
                                     <div
                                         key={diet}
-                                        className="bg-white rounded-lg shadow-md p-4 text-center cursor-pointer hover:shadow-lg transition-shadow"
+                                        className="bg-white rounded-lg shadow-md p-4 text-center cursor-pointer hover:shadow-lg transition-all hover:scale-105"
                                         onClick={() => handleDietaryFilter(diet)}
                                     >
                                         <div className="mb-3 flex justify-center">

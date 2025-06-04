@@ -8,7 +8,13 @@ import { getFilterOptions } from '../../services/api';
 
 const SearchForm = ({ showInlineResults = false }) => {
     const navigate = useNavigate();
-    const { searchParams, updateSearchParams } = useSearch();
+    const { 
+        searchParams, 
+        updateSearchParams, 
+        executeSearch, 
+        updateSearchParamsAndSearch,
+        setAutoSearch 
+    } = useSearch();
     
     // Local form state (doesn't trigger searches until submitted)
     const [formData, setFormData] = useState({
@@ -24,11 +30,22 @@ const SearchForm = ({ showInlineResults = false }) => {
     const [filterOptions, setFilterOptions] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
     const location = useGeolocation();
 
-    // Fetch filter options from API
+    // Enable auto-search for inline results (like HomePage)
+    useEffect(() => {
+        if (showInlineResults) {
+            setAutoSearch(true);
+        }
+        return () => {
+            if (showInlineResults) {
+                setAutoSearch(false);
+            }
+        };
+    }, [showInlineResults, setAutoSearch]);
+
+    // Fetch filter options from API (only once)
     useEffect(() => {
         const fetchOptions = async () => {
             try {
@@ -46,7 +63,8 @@ const SearchForm = ({ showInlineResults = false }) => {
         fetchOptions();
     }, []);
 
-    // Update form data when search params change (from external sources)
+    // Update form data when search params change from external sources
+    // but DON'T trigger any searches
     useEffect(() => {
         setFormData({
             query: searchParams.query || '',
@@ -57,10 +75,9 @@ const SearchForm = ({ showInlineResults = false }) => {
             max_price: searchParams.max_price || '',
             dietary_restrictions: searchParams.dietary_restrictions || [],
         });
-        setHasUnsavedChanges(false);
     }, [searchParams]);
 
-    // Use geolocation data when available
+    // Handle location update - just update form data, don't auto-search
     useEffect(() => {
         if (location.latitude && location.longitude) {
             setFormData(prev => ({
@@ -68,23 +85,9 @@ const SearchForm = ({ showInlineResults = false }) => {
                 latitude: location.latitude,
                 longitude: location.longitude
             }));
-            setHasUnsavedChanges(true);
+            // Note: Not automatically triggering search here anymore
         }
     }, [location.latitude, location.longitude]);
-
-    // Check if form has changed from current search params
-    useEffect(() => {
-        const formChanged = 
-            formData.query !== (searchParams.query || '') ||
-            formData.latitude !== (searchParams.latitude || '') ||
-            formData.longitude !== (searchParams.longitude || '') ||
-            formData.max_distance !== (searchParams.max_distance || 10) ||
-            formData.min_rating !== (searchParams.min_rating || '') ||
-            formData.max_price !== (searchParams.max_price || '') ||
-            JSON.stringify(formData.dietary_restrictions.sort()) !== JSON.stringify((searchParams.dietary_restrictions || []).sort());
-        
-        setHasUnsavedChanges(formChanged);
-    }, [formData, searchParams]);
 
     const handleInputChange = (e) => {
         const { name, value } = e.target;
@@ -111,26 +114,30 @@ const SearchForm = ({ showInlineResults = false }) => {
         }));
     };
 
+    const prepareSearchParams = (data) => ({
+        query: data.query.trim(),
+        latitude: data.latitude ? parseFloat(data.latitude) : null,
+        longitude: data.longitude ? parseFloat(data.longitude) : null,
+        max_distance: parseInt(data.max_distance),
+        min_rating: data.min_rating ? parseFloat(data.min_rating) : null,
+        max_price: data.max_price ? parseInt(data.max_price) : null,
+        dietary_restrictions: data.dietary_restrictions,
+    });
+
     const handleSubmit = (e) => {
         e.preventDefault();
         
-        // Prepare the update with proper data types
-        const updates = {
-            query: formData.query.trim(),
-            latitude: formData.latitude ? parseFloat(formData.latitude) : null,
-            longitude: formData.longitude ? parseFloat(formData.longitude) : null,
-            max_distance: parseInt(formData.max_distance),
-            min_rating: formData.min_rating ? parseFloat(formData.min_rating) : null,
-            max_price: formData.max_price ? parseInt(formData.max_price) : null,
-            dietary_restrictions: formData.dietary_restrictions,
-        };
+        const searchParamsToUpdate = prepareSearchParams(formData);
         
-        // Batch update all search parameters at once
-        updateSearchParams(updates);
-        
-        // Navigate to search page if not showing inline results and not already there
-        if (!showInlineResults && window.location.pathname !== '/search') {
-            navigate('/search');
+        if (showInlineResults) {
+            // For inline results, update params and search will auto-trigger due to auto-search being enabled
+            updateSearchParams(searchParamsToUpdate);
+        } else {
+            // For dedicated search page, update params and navigate
+            updateSearchParams(searchParamsToUpdate);
+            if (window.location.pathname !== '/search') {
+                navigate('/search');
+            }
         }
     };
 
@@ -139,22 +146,13 @@ const SearchForm = ({ showInlineResults = false }) => {
     };
 
     const handleQuickSearch = (quickQuery) => {
-        const updates = {
-            ...formData,
-            query: quickQuery,
-        };
-        setFormData(updates);
+        const updatedFormData = { ...formData, query: quickQuery };
+        setFormData(updatedFormData);
         
-        // For quick searches, immediately update search params
-        updateSearchParams({
-            query: quickQuery,
-            latitude: formData.latitude ? parseFloat(formData.latitude) : null,
-            longitude: formData.longitude ? parseFloat(formData.longitude) : null,
-            max_distance: parseInt(formData.max_distance),
-            min_rating: formData.min_rating ? parseFloat(formData.min_rating) : null,
-            max_price: formData.max_price ? parseInt(formData.max_price) : null,
-            dietary_restrictions: formData.dietary_restrictions,
-        });
+        const searchParamsToUpdate = prepareSearchParams(updatedFormData);
+        
+        // For quick searches, immediately execute search
+        updateSearchParamsAndSearch(searchParamsToUpdate);
     };
 
     const handleReset = () => {
@@ -180,15 +178,15 @@ const SearchForm = ({ showInlineResults = false }) => {
         });
     };
 
+    // Check if form is valid for submission
+    const isFormValid = formData.query.trim() || 
+                       (formData.latitude && formData.longitude) || 
+                       formData.dietary_restrictions.length > 0;
+
     return (
         <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold text-primary-dark">Find Restaurants</h2>
-                {hasUnsavedChanges && (
-                    <span className="text-sm text-amber-600 font-medium">
-                        Unsaved changes
-                    </span>
-                )}
             </div>
 
             {/* Quick Search Buttons */}
@@ -295,7 +293,6 @@ const SearchForm = ({ showInlineResults = false }) => {
 
                 {/* Rating and Price */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                    {/* Rating */}
                     <div>
                         <label htmlFor="min_rating" className="block text-gray-700 font-medium mb-2">
                             Minimum Rating
@@ -314,7 +311,6 @@ const SearchForm = ({ showInlineResults = false }) => {
                         </select>
                     </div>
 
-                    {/* Price */}
                     <div>
                         <label htmlFor="max_price" className="block text-gray-700 font-medium mb-2">
                             Max Price
@@ -328,9 +324,9 @@ const SearchForm = ({ showInlineResults = false }) => {
                         >
                             <option value="">Any Price</option>
                             <option value="1">$ (Inexpensive)</option>
-                            <option value="2">$ (Moderate)</option>
-                            <option value="3">$$ (Expensive)</option>
-                            <option value="4">$$ (Very Expensive)</option>
+                            <option value="2">$$ (Moderate)</option>
+                            <option value="3">$$$ (Expensive)</option>
+                            <option value="4">$$$$ (Very Expensive)</option>
                         </select>
                     </div>
                 </div>
@@ -368,22 +364,20 @@ const SearchForm = ({ showInlineResults = false }) => {
                     <Button 
                         type="submit" 
                         className="flex-1"
-                        disabled={!formData.query && !formData.latitude && formData.dietary_restrictions.length === 0}
+                        disabled={!isFormValid}
                     >
-                        {showInlineResults ? 'Update Search' : 'Search Restaurants'}
+                        {showInlineResults ? 'Search' : 'Search Restaurants'}
                     </Button>
                     
-                    {hasUnsavedChanges && (
-                        <Button 
-                            type="button"
-                            variant="outline"
-                            onClick={handleReset}
-                        >
-                            Reset
-                        </Button>
-                    )}
+                    <Button 
+                        type="button"
+                        variant="outline"
+                        onClick={handleReset}
+                    >
+                        Reset
+                    </Button>
                     
-                    {showInlineResults && !hasUnsavedChanges && formData.query && (
+                    {showInlineResults && (
                         <Button 
                             type="button"
                             variant="outline"
@@ -398,8 +392,8 @@ const SearchForm = ({ showInlineResults = false }) => {
                 <div className="mt-4 text-sm text-gray-600">
                     <p>
                         💡 <strong>Tip:</strong> {showInlineResults 
-                            ? 'Results will appear below as you search. Use "Advanced Search" for more filtering options.'
-                            : 'Enter a location or food type to get started. Use your current location for best results.'
+                            ? 'Click "Search" to find restaurants. Results will appear below.'
+                            : 'Fill in your preferences and click "Search Restaurants" to find matches.'
                         }
                     </p>
                 </div>
