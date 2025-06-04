@@ -38,12 +38,19 @@ def create_app(config_class='config.config.Config'):
     # Load configuration
     app.config.from_object(config_class)
     
-    # Configure CORS
+    # FIXED: Configure CORS with additional allowed headers
     CORS(app, resources={
         r"/api/*": {
             "origins": "*",
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"]
+            "allow_headers": [
+                "Content-Type", 
+                "Authorization", 
+                "Cache-Control",           # ← Added this
+                "X-Requested-With",        # ← Common header
+                "Accept",                  # ← Common header
+                "Origin"                   # ← Common header
+            ]
         }
     })
     
